@@ -1,0 +1,23 @@
+/* Estilos base para garantizar que el body ocupe toda la pantalla */
+body {
+    background-color: #f3f4f6; /* bg-gray-100 */
+    transition: background-color 0.3s ease;
+    /* Asegurar que el scroll vertical esté siempre disponible en móvil */
+    min-height: 100vh; 
+}
+
+/* Clase para el modo de alto contraste */
+.high-contrast-mode {
+    background-color: #000;
+}
+
+/* Estilo para el enfoque de accesibilidad (crucial para la navegación por teclado) */
+:focus-visible {
+    outline: 3px solid #f97316; /* Tailwind orange-500 */
+    outline-offset: 2px;
+}
+
+/* Asegurar que los botones de acceso rápido y opciones de accesibilidad sean fáciles de pulsar */
+.quick-access-btn, .accessibility-option {
+    min-height: 48px; /* Tamaño mínimo de toque recomendado */
+}
