@@ -1,8 +1,7 @@
 /* Estilos base para garantizar que el body ocupe toda la pantalla */
 body {
-    background-color: #f3f4f6; /* bg-gray-100 */
+    background-color: #f3f4f6;
     transition: background-color 0.3s ease;
-    /* Asegurar que el scroll vertical esté siempre disponible en móvil */
     min-height: 100vh; 
 }
 
@@ -11,13 +10,111 @@ body {
     background-color: #000;
 }
 
-/* Estilo para el enfoque de accesibilidad (crucial para la navegación por teclado) */
+/* Estilo para el enfoque de accesibilidad */
 :focus-visible {
-    outline: 3px solid #f97316; /* Tailwind orange-500 */
+    outline: 3px solid #f97316;
     outline-offset: 2px;
 }
 
-/* Asegurar que los botones de acceso rápido y opciones de accesibilidad sean fáciles de pulsar */
+/* Tamaño mínimo de toque recomendado */
 .quick-access-btn, .accessibility-option {
-    min-height: 48px; /* Tamaño mínimo de toque recomendado */
+    min-height: 48px;
+}
+
+/* Estilos para el mapa Leaflet */
+#campus-map {
+    z-index: 1;
+}
+
+.leaflet-popup-content {
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.leaflet-popup-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+}
+
+.leaflet-container {
+    background: #f8fafc;
+    transition: all 0.3s ease;
+}
+
+.high-contrast-mode .leaflet-container {
+    background: #1f2937;
+    filter: invert(1) hue-rotate(180deg);
+}
+
+/* Marcadores personalizados */
+.user-location-marker {
+    background: transparent !important;
+    border: none !important;
+}
+
+.destination-marker {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Animación para el marcador de usuario */
+@keyframes pulse-gps {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.user-location-marker div {
+    animation: pulse-gps 2s infinite;
+}
+
+/* Botón de GPS */
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Mejorar visibilidad del círculo de precisión GPS */
+.leaflet-interactive {
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Rutas principales */
+.main-route-path {
+    stroke-dasharray: 0;
+    animation: none;
+}
+
+/* Rutas calculadas */
+.calculated-route {
+    stroke-dasharray: 10, 10;
+    animation: moveDash 1s linear infinite;
+}
+
+@keyframes moveDash {
+    to {
+        stroke-dashoffset: -20;
+    }
+}
+
+/* Mejor contraste para rutas */
+.high-contrast-mode .leaflet-overlay-pane path {
+    filter: brightness(1.5) contrast(1.2);
+}
+
+/* Leyenda del mapa */
+.map-legend {
+    background: rgba(255, 255, 255, 0.9);
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+}
+
+.high-contrast-mode .map-legend {
+    background: rgba(0, 0, 0, 0.9);
+    border-color: yellow;
 }
