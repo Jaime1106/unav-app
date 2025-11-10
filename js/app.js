@@ -1,5 +1,3 @@
-// js/app.js - SISTEMA COMPLETO CON GPS, RUTAS REALES, DIJKSTRA, VOZ Y MODO MANUAL
-
 // --- 1. ESTADO DE LA APLICACIÓN ---
 let appState = {
     settings: {
@@ -11,10 +9,7 @@ let appState = {
         voiceCommands: true
     },
     quickDestinations: [
-        { name: 'Biblioteca', icon: 'BookOpen', action: 'Biblioteca CUC' },
-        { name: 'Cafetería', icon: 'Utensils', action: 'Central' },
-        { name: 'Parking', icon: 'Car', action: 'Parqueaderos zona sur' },
-        { name: 'Entrada', icon: 'Send', action: 'entrada cl. 58' },
+        // Estos se llenarán dinámicamente
     ],
     accessibilityOptions: [
         { key: 'isVoiceActive', label: 'Activar guía de voz automáticamente' },
@@ -34,10 +29,261 @@ let appState = {
     navigationActive: false,
     lastInstructionIndex: -1,
     isListening: false,
-    manualMode: false
+    manualMode: false,
+    buildingData: null
 };
 
-// --- 2. LÓGICA DE VOZ (TTS) MEJORADA ---
+// --- 2. DICCIONARIO DE COMANDOS DE VOZ MEJORADO ---
+const voiceCommandsDictionary = {
+    // Comandos de navegación con múltiples variantes
+    navigate: [
+        'navegar', 'ir', 'dirección', 'llevar', 'rumbo', 'vamos', 'vayamos', 'dirigir',
+        'vamos a', 'ir a', 'navegar a', 'llevar a', 'dirigir a', 'rumbo a',
+        'quiero ir', 'necesito ir', 'deseo ir', 'me lleva', 'llévame', 'muéstrame el camino a',
+        'quiero llegar a', 'deseo llegar a', 'cómo llego a', 'ruta a', 'camino a'
+    ],
+    
+    // Destinos rápidos
+    destinations: {
+        'biblioteca': ['biblioteca', 'libros', 'estudio', 'lectura', 'salón de estudio', 'zona de estudio'],
+        'cafetería': ['cafetería', 'comer', 'almorzar', 'comida', 'almuerzo', 'restaurante', 'cena', 'refrigerio'],
+        'parking': ['parking', 'estacionamiento', 'parqueadero', 'coche', 'carro', 'vehículo', 'auto', 'moto'],
+        'entrada': ['entrada', 'entrar', 'principal', 'acceso', 'puerta', 'ingreso', 'acceso principal'],
+        'coliseo': ['coliseo', 'auditorio', 'eventos', 'conciertos', 'presentaciones', 'actos'],
+        'cancha': ['cancha', 'deportes', 'fútbol', 'baloncesto', 'deporte', 'ejercicio', 'deportiva'],
+        'enfermería': ['enfermería', 'enfermeria', 'médico', 'doctor', 'salud', 'emergencia', 'clínica'],
+        'creatio': ['creatio', 'laboratorio', 'lab', 'tecnología', 'innovación', 'creativo'],
+        'multidiomas': ['multidiomas', 'idiomas', 'lenguas', 'inglés', 'francés', 'alemán', 'portugués'],
+        'ced': ['ced', 'centro', 'desarrollo', 'emprendimiento', 'innovación empresarial'],
+        'gimnasio': ['gimnasio', 'ejercicio', 'deporte', 'baile', 'danza', 'fitness', 'entrenamiento']
+    },
+    
+    // Bloques académicos
+    blocks: {
+        'Bloque 1': ['bloque 1', 'bloque uno', 'edificio 1', 'edificio uno', 'bloque uno'],
+        'Bloque 2': ['bloque 2', 'bloque dos', 'edificio 2', 'edificio dos', 'bloque dos'],
+        'bloque 4': ['bloque 4', 'bloque cuatro', 'edificio 4', 'edificio cuatro', 'bloque cuatro'],
+        'Bloque 5': ['bloque 5', 'bloque cinco', 'edificio 5', 'edificio cinco', 'bloque cinco'],
+        'Bloque 6': ['bloque 6', 'bloque seis', 'edificio 6', 'edificio seis', 'bloque seis'],
+        'Bloque 7': ['bloque 7', 'bloque siete', 'edificio 7', 'edificio siete', 'bloque siete'],
+        'bloque 8': ['bloque 8', 'bloque ocho', 'edificio 8', 'edificio ocho', 'bloque ocho'],
+        'Bloque 9': ['bloque 9', 'bloque nueve', 'edificio 9', 'edificio nueve', 'bloque nueve'],
+        'Bloque 10': ['bloque 10', 'bloque diez', 'edificio 10', 'edificio diez', 'bloque diez'],
+        'Bloque 11': ['bloque 11', 'bloque once', 'edificio 11', 'edificio once', 'bloque once'],
+        'Bloque 12': ['bloque 12', 'bloque doce', 'edificio 12', 'edificio doce', 'bloque doce']
+    },
+    
+    // Comandos de control
+    control: {
+        'detener': ['detener', 'parar', 'cancelar', 'terminar', 'stop', 'finalizar', 'acabar', 'basta'],
+        'gps activar': ['activar gps', 'encender gps', 'iniciar gps', 'prender gps', 'conectar gps', 'usar gps'],
+        'gps desactivar': ['desactivar gps', 'apagar gps', 'detener gps', 'desconectar gps', 'no usar gps'],
+        'ubicación': ['dónde estoy', 'mi ubicación', 'ubicación actual', 'estoy aquí', 'localización', 'en dónde estoy'],
+        'repetir': ['repetir instrucción', 'repite', 'otra vez', 'de nuevo', 'repítelo', 'qué dijo', 'no entendí'],
+        'siguiente': ['siguiente instrucción', 'próxima instrucción', 'siguiente', 'continúa', 'adelante', 'sigue'],
+        'puntos': ['puntos cercanos', 'puntos de interés', 'qué hay cerca', 'lugares cercanos', 'sitios cerca', 'qué hay alrededor'],
+        'ayuda': ['ayuda', 'comandos', 'qué puedo decir', 'opciones', 'instrucciones', 'dime los comandos', 'qué comandos hay']
+    },
+    
+    // Modo manual
+    manual: {
+        'manual activar': ['modo manual', 'ubicación manual', 'establecer ubicación', 'poner ubicación', 'marcar ubicación'],
+        'manual desactivar': ['quitar ubicación', 'eliminar ubicación', 'limpiar ubicación', 'desactivar manual', 'salir manual', 'borrar ubicación']
+    }
+};
+
+// --- 3. SISTEMA DE DESTINOS MEJORADO ---
+const destinationsSystem = {
+    // Categorías de destinos
+    categories: [
+        {
+            id: 'entradas',
+            name: '🚪 Entradas',
+            icon: 'door-open',
+            items: [
+                { name: 'entrada cl. 58', displayName: 'Entrada Calle 58' },
+                { name: 'entrada cul', displayName: 'Entrada CUL' }
+            ]
+        },
+        {
+            id: 'bloques',
+            name: '🏫 Bloques Académicos',
+            icon: 'building',
+            items: [] // Se llenará dinámicamente
+        },
+        {
+            id: 'servicios',
+            name: '🏥 Servicios',
+            icon: 'heart',
+            items: [
+                { name: 'Biblioteca CUC', displayName: 'Biblioteca' },
+                { name: 'Central', displayName: 'Cafetería Central' },
+                { name: 'Enfermeria', displayName: 'Enfermería' },
+                { name: 'Creatio lab', displayName: 'Creatio Lab' },
+                { name: 'Multidiomas', displayName: 'Centro de Idiomas' },
+                { name: 'CED', displayName: 'CED' },
+                { name: 'salones CUL', displayName: 'Salones CUL' }
+            ]
+        },
+        {
+            id: 'deportes',
+            name: '⚽ Deportes',
+            icon: 'dumbbell',
+            items: [
+                { name: 'Cancha multiple', displayName: 'Cancha Múltiple' },
+                { name: 'Gimnasio y salon de baile', displayName: 'Gimnasio' },
+                { name: 'Coliseo auditorio', displayName: 'Coliseo Auditorio' }
+            ]
+        },
+        {
+            id: 'parqueaderos',
+            name: '🅿️ Parqueaderos',
+            icon: 'car',
+            items: [
+                { name: 'Parqueaderos zona sur', displayName: 'Parqueadero Sur' },
+                { name: 'Parqueaderos carros y motos Zona norte', displayName: 'Parqueadero Norte' },
+                { name: 'Parqueadero carros y motos zona norte', displayName: 'Parqueadero Norte 2' }
+            ]
+        },
+        {
+            id: 'plazoletas',
+            name: '🌳 Plazoletas',
+            icon: 'square',
+            items: [
+                { name: 'Plazoleta Principal', displayName: 'Plazoleta Principal' },
+                { name: 'Plazoleta coliseo', displayName: 'Plazoleta Coliseo' },
+                { name: 'Plazoleta central', displayName: 'Plazoleta Central' },
+                { name: 'Plazoleta bloque 10 y 11', displayName: 'Plazoleta Bloques 10-11' }
+            ]
+        },
+        {
+            id: 'servicios_aux',
+            name: '🚻 Servicios Auxiliares',
+            icon: 'wc',
+            items: [
+                { name: 'baños hombres cancha', displayName: 'Baños Cancha' },
+                { name: 'Bloque 9 Baños', displayName: 'Baños Bloque 9' },
+                { name: 'Baños de hombres central', displayName: 'Baños Central Hombres' },
+                { name: 'Baños de mujeres central', displayName: 'Baños Central Mujeres' },
+                { name: 'Baños multidiomas', displayName: 'Baños Multidiomas' },
+                { name: 'Container de comida', displayName: 'Container Comida' },
+                { name: 'Salones container', displayName: 'Salones Container' },
+                { name: 'Containers', displayName: 'Containers' }
+            ]
+        }
+    ],
+
+    // Inicializar sistema de destinos
+    init: function(buildingData) {
+        this.extractBlocksFromData(buildingData);
+        this.generateQuickDestinations();
+    },
+
+    // Extraer bloques de los datos del edificio
+    extractBlocksFromData: function(buildingData) {
+        const blocksCategory = this.categories.find(cat => cat.id === 'bloques');
+        if (!blocksCategory) return;
+
+        blocksCategory.items = [];
+        
+        buildingData.features.forEach(feature => {
+            const name = Object.keys(feature.properties)[0];
+            if (name && name.toLowerCase().includes('bloque')) {
+                const blockNumber = name.match(/\d+/);
+                const displayName = blockNumber ? `Bloque ${blockNumber[0]}` : name;
+                
+                blocksCategory.items.push({
+                    name: name,
+                    displayName: displayName
+                });
+            }
+        });
+
+        // Ordenar bloques numéricamente
+        blocksCategory.items.sort((a, b) => {
+            const numA = parseInt(a.displayName.match(/\d+/)) || 0;
+            const numB = parseInt(b.displayName.match(/\d+/)) || 0;
+            return numA - numB;
+        });
+    },
+
+    // Generar destinos rápidos
+    generateQuickDestinations: function() {
+        appState.quickDestinations = [
+            // Destinos principales
+            { name: 'Biblioteca', icon: 'BookOpen', action: 'Biblioteca CUC', category: 'servicios' },
+            { name: 'Cafetería', icon: 'Utensils', action: 'Central', category: 'servicios' },
+            { name: 'Entrada', icon: 'DoorOpen', action: 'entrada cl. 58', category: 'entradas' },
+            { name: 'Parking', icon: 'Car', action: 'Parqueaderos zona sur', category: 'parqueaderos' },
+            
+            // Destinos adicionales populares
+            { name: 'Coliseo', icon: 'Users', action: 'Coliseo auditorio', category: 'deportes' },
+            { name: 'Enfermería', icon: 'Heart', action: 'Enfermeria', category: 'servicios' },
+            { name: 'Bloque 1', icon: 'Building', action: 'Bloque 1', category: 'bloques' },
+            { name: 'Cancha', icon: 'Activity', action: 'Cancha multiple', category: 'deportes' }
+        ];
+    },
+
+    // Obtener todos los destinos para búsqueda
+    getAllDestinations: function() {
+        const allDestinations = [];
+        this.categories.forEach(category => {
+            category.items.forEach(item => {
+                allDestinations.push({
+                    name: item.name,
+                    displayName: item.displayName,
+                    category: category.name,
+                    icon: category.icon
+                });
+            });
+        });
+        return allDestinations;
+    },
+
+    // Buscar destino por nombre o alias
+    findDestination: function(searchTerm) {
+        const term = searchTerm.toLowerCase().trim();
+        const allDestinations = this.getAllDestinations();
+        
+        // Búsqueda exacta
+        let destination = allDestinations.find(dest => 
+            dest.name.toLowerCase() === term || 
+            dest.displayName.toLowerCase() === term
+        );
+        
+        if (destination) return destination;
+
+        // Búsqueda parcial
+        destination = allDestinations.find(dest => 
+            dest.name.toLowerCase().includes(term) || 
+            dest.displayName.toLowerCase().includes(term)
+        );
+        
+        if (destination) return destination;
+
+        // Búsqueda en categorías
+        for (const [key, aliases] of Object.entries(voiceCommandsDictionary.destinations)) {
+            if (aliases.some(alias => term.includes(alias))) {
+                return allDestinations.find(dest => 
+                    dest.displayName.toLowerCase().includes(key)
+                );
+            }
+        }
+
+        // Búsqueda en bloques
+        for (const [block, aliases] of Object.entries(voiceCommandsDictionary.blocks)) {
+            if (aliases.some(alias => term.includes(alias))) {
+                return allDestinations.find(dest => 
+                    dest.name.toLowerCase() === block.toLowerCase()
+                );
+            }
+        }
+
+        return null;
+    }
+};
+
+// --- 4. LÓGICA DE VOZ (TTS) MEJORADA ---
 const voiceGuide = {
     isSpeaking: false,
     lastInstruction: '',
@@ -107,6 +353,7 @@ const voiceGuide = {
         const messages = {
             'stairs': `Atención: escaleras ${pointName ? 'en ' + pointName : 'por delante'}. Tenga cuidado.`,
             'ramp': `Rampa disponible ${pointName ? 'en ' + pointName : ''}. Puede usarla si necesita.`,
+            'ramp_start': `Inicio de rampa ${pointName ? 'en ' + pointName : ''}. Opción accesible disponible.`,
             'relief_change': `Cambio de relieve en el camino. Preste atención al suelo.`,
             'building_entrance': `Ha llegado a la entrada de ${pointName}.`
         };
@@ -117,7 +364,291 @@ const voiceGuide = {
     }
 };
 
-// --- 3. SISTEMA DE GPS Y UBICACIÓN ---
+// --- 5. SISTEMA DE PUNTOS DE INTERÉS MEJORADO ---
+const pointsSystem = {
+    pointsData: null,
+    activePoints: new Map(),
+    announcedPoints: new Set(),
+    pointsLayer: null,
+    
+    // Cargar puntos de interés
+    loadPointsData: function() {
+        fetch('map_points.geojson')
+            .then(response => response.json())
+            .then(data => {
+                this.pointsData = data;
+                this.displayPointsOnMap();
+                console.log('Puntos de interés cargados:', data.features.length);
+            })
+            .catch(error => {
+                console.error('Error cargando puntos de interés:', error);
+            });
+    },
+    
+    // Mostrar puntos en el mapa
+    displayPointsOnMap: function() {
+        if (!this.pointsData || !mapSystem.map) return;
+        
+        // Crear capa para puntos de interés
+        this.pointsLayer = L.geoJSON(this.pointsData, {
+            pointToLayer: function(feature, latlng) {
+                const type = feature.properties.type;
+                const icon = pointsSystem.getPointIcon(type);
+                
+                return L.marker(latlng, {
+                    icon: icon,
+                    zIndexOffset: 500
+                });
+            },
+            onEachFeature: function(feature, layer) {
+                const properties = feature.properties;
+                const popupContent = `
+                    <div class="p-2 max-w-xs">
+                        <div class="flex items-center mb-2">
+                            <div class="w-3 h-3 rounded-full ${pointsSystem.getPointColor(properties.type)} mr-2"></div>
+                            <strong class="text-sm">${properties.name}</strong>
+                        </div>
+                        <p class="text-xs text-gray-600 mb-2">${properties.message}</p>
+                        <div class="text-xs">
+                            <span class="inline-block px-2 py-1 rounded ${pointsSystem.getPriorityBadge(properties.priority)}">
+                                ${properties.priority === 'high' ? '⚠️ Alta prioridad' : 
+                                  properties.priority === 'medium' ? '🔶 Media prioridad' : 'ℹ️ Informativo'}
+                            </span>
+                        </div>
+                    </div>
+                `;
+                layer.bindPopup(popupContent);
+            }
+        }).addTo(mapSystem.map);
+    },
+    
+    // Obtener icono según tipo de punto
+    getPointIcon: function(type) {
+        const iconConfig = {
+            'stairs': { color: '#ef4444', icon: '🔺' },
+            'ramp': { color: '#10b981', icon: '🔄' },
+            'ramp_start': { color: '#10b981', icon: '🔼' },
+            'relief_change': { color: '#f59e0b', icon: '⚠️' }
+        };
+        
+        const config = iconConfig[type] || { color: '#6b7280', icon: '📍' };
+        
+        return L.divIcon({
+            className: `point-marker point-${type}`,
+            html: `
+                <div class="relative">
+                    <div class="w-8 h-8 bg-white rounded-full border-2 border-${config.color.replace('#', '')} shadow-lg flex items-center justify-center text-sm">
+                        ${config.icon}
+                    </div>
+                    <div class="absolute -top-1 -right-1 w-4 h-4 bg-${config.color.replace('#', '')} rounded-full border-2 border-white"></div>
+                </div>
+            `,
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+        });
+    },
+    
+    // Obtener color según tipo
+    getPointColor: function(type) {
+        const colors = {
+            'stairs': 'bg-red-500',
+            'ramp': 'bg-green-500',
+            'ramp_start': 'bg-green-500',
+            'relief_change': 'bg-yellow-500'
+        };
+        return colors[type] || 'bg-gray-500';
+    },
+    
+    // Obtener badge de prioridad
+    getPriorityBadge: function(priority) {
+        const badges = {
+            'high': 'bg-red-100 text-red-800',
+            'medium': 'bg-yellow-100 text-yellow-800',
+            'info': 'bg-blue-100 text-blue-800'
+        };
+        return badges[priority] || 'bg-gray-100 text-gray-800';
+    },
+    
+    // Verificar proximidad a puntos durante la navegación
+    checkProximityToPoints: function(userLocation, route) {
+        if (!this.pointsData) return;
+        
+        const proximityThreshold = 15; // metros
+        
+        this.pointsData.features.forEach((point, index) => {
+            const pointId = `point-${index}`;
+            
+            // Si ya fue anunciado, no repetir
+            if (this.announcedPoints.has(pointId)) return;
+            
+            const pointCoords = point.geometry.coordinates;
+            const distance = routingSystem.calculateDistance(
+                userLocation, 
+                [pointCoords[1], pointCoords[0]]
+            );
+            
+            if (distance <= proximityThreshold) {
+                this.triggerPointAlert(point, distance);
+                this.announcedPoints.add(pointId);
+                
+                // Resaltar punto en el mapa
+                this.highlightPoint(point, index);
+            }
+        });
+    },
+    
+    // Activar alerta de punto
+    triggerPointAlert: function(point, distance) {
+        const properties = point.properties;
+        
+        if (properties.audio_alert && appState.settings.isVoiceActive) {
+            voiceGuide.announcePointOfInterest(properties.type, properties.name);
+        }
+        
+        // Mostrar notificación visual
+        this.showPointNotification(properties);
+        
+        console.log(`🔔 Punto de interés: ${properties.name} (${Math.round(distance)}m)`);
+    },
+    
+    // Mostrar notificación visual
+    showPointNotification: function(properties) {
+        // Crear notificación toast
+        const notification = document.createElement('div');
+        notification.className = `point-notification fixed top-4 right-4 p-4 rounded-lg shadow-lg border-l-4 z-[1000] max-w-sm animate-fade-in ${
+            properties.priority === 'high' ? 'bg-red-50 border-red-500' :
+            properties.priority === 'medium' ? 'bg-yellow-50 border-yellow-500' :
+            'bg-blue-50 border-blue-500'
+        }`;
+        
+        notification.innerHTML = `
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <div class="w-6 h-6 rounded-full ${this.getPointColor(properties.type)} flex items-center justify-center text-white text-xs">
+                        ${properties.priority === 'high' ? '⚠️' : 'ℹ️'}
+                    </div>
+                </div>
+                <div class="ml-3">
+                    <h4 class="text-sm font-medium ${
+                        properties.priority === 'high' ? 'text-red-800' :
+                        properties.priority === 'medium' ? 'text-yellow-800' :
+                        'text-blue-800'
+                    }">
+                        ${properties.name}
+                    </h4>
+                    <p class="text-sm ${
+                        properties.priority === 'high' ? 'text-red-600' :
+                        properties.priority === 'medium' ? 'text-yellow-600' :
+                        'text-blue-600'
+                    } mt-1">
+                        ${properties.message}
+                    </p>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remover después de 5 segundos
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.classList.add('animate-fade-out');
+                setTimeout(() => notification.remove(), 300);
+            }
+        }, 5000);
+    },
+    
+    // Resaltar punto en el mapa
+    highlightPoint: function(point, index) {
+        if (!this.pointsLayer) return;
+        
+        const layers = this.pointsLayer.getLayers();
+        if (layers[index]) {
+            const layer = layers[index];
+            
+            // Animación de resaltado
+            const marker = layer;
+            marker.setZIndexOffset(1000);
+            
+            // Efecto de pulso
+            const originalIcon = marker.options.icon;
+            const highlightIcon = this.createHighlightIcon(point.properties.type);
+            marker.setIcon(highlightIcon);
+            
+            setTimeout(() => {
+                marker.setIcon(originalIcon);
+                marker.setZIndexOffset(500);
+            }, 3000);
+            
+            // Abrir popup automáticamente para puntos de alta prioridad
+            if (point.properties.priority === 'high') {
+                marker.openPopup();
+            }
+        }
+    },
+    
+    // Crear icono resaltado
+    createHighlightIcon: function(type) {
+        const iconConfig = {
+            'stairs': { color: '#dc2626', icon: '🔺' },
+            'ramp': { color: '#059669', icon: '🔄' },
+            'ramp_start': { color: '#059669', icon: '🔼' },
+            'relief_change': { color: '#d97706', icon: '⚠️' }
+        };
+        
+        const config = iconConfig[type] || { color: '#4b5563', icon: '📍' };
+        
+        return L.divIcon({
+            className: `point-marker point-${type} highlighted`,
+            html: `
+                <div class="relative animate-pulse">
+                    <div class="w-10 h-10 bg-white rounded-full border-4 border-${config.color.replace('#', '')} shadow-lg flex items-center justify-center text-lg">
+                        ${config.icon}
+                    </div>
+                    <div class="absolute -top-1 -right-1 w-5 h-5 bg-${config.color.replace('#', '')} rounded-full border-2 border-white animate-ping"></div>
+                </div>
+            `,
+            iconSize: [40, 40],
+            iconAnchor: [20, 20]
+        });
+    },
+    
+    // Reiniciar puntos anunciados (al iniciar nueva navegación)
+    resetAnnouncedPoints: function() {
+        this.announcedPoints.clear();
+    },
+    
+    // Obtener puntos cercanos a una ruta
+    getPointsNearRoute: function(routeCoordinates, maxDistance = 20) {
+        if (!this.pointsData) return [];
+        
+        const nearbyPoints = [];
+        
+        this.pointsData.features.forEach(point => {
+            const pointCoords = [point.geometry.coordinates[1], point.geometry.coordinates[0]];
+            
+            // Verificar distancia a cualquier punto de la ruta
+            let minDistance = Infinity;
+            routeCoordinates.forEach(routePoint => {
+                const distance = routingSystem.calculateDistance(routePoint, pointCoords);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                }
+            });
+            
+            if (minDistance <= maxDistance) {
+                nearbyPoints.push({
+                    point: point,
+                    distance: minDistance
+                });
+            }
+        });
+        
+        return nearbyPoints.sort((a, b) => a.distance - b.distance);
+    }
+};
+
+// --- 6. SISTEMA DE GPS Y UBICACIÓN ---
 const gpsService = {
     // Obtener ubicación actual una vez
     getCurrentLocation: function() {
@@ -226,7 +757,7 @@ const gpsService = {
     }
 };
 
-// --- 4. SISTEMA DE RUTAS MEJORADO CON DIJKSTRA ---
+// --- 7. SISTEMA DE RUTAS MEJORADO CON DIJKSTRA ---
 const routingSystem = {
     campusGraph: null,
     allRoutes: [],
@@ -564,6 +1095,15 @@ const routingSystem = {
         const instructions = [];
         let totalDistance = 0;
         
+        // Obtener puntos cercanos a la ruta completa
+        const allRouteCoords = [startLocation];
+        routeNodes.forEach(node => {
+            allRouteCoords.push([node.lat, node.lng]);
+        });
+        allRouteCoords.push(destinationLocation);
+        
+        const nearbyPoints = pointsSystem.getPointsNearRoute(allRouteCoords, 15);
+        
         for (let i = 0; i < routeNodes.length - 1; i++) {
             const currentNode = routeNodes[i];
             const nextNode = routeNodes[i + 1];
@@ -579,6 +1119,23 @@ const routingSystem = {
                 });
             }
             
+            // Verificar si hay puntos de interés en este segmento
+            const segmentPoints = nearbyPoints.filter(point => {
+                const pointDistance = this.calculateDistance(currentNode.coord, [point.point.geometry.coordinates[1], point.point.geometry.coordinates[0]]);
+                return pointDistance <= segmentDistance + 10;
+            });
+            
+            // Agregar instrucciones para puntos de interés
+            segmentPoints.forEach(pointInfo => {
+                instructions.push({
+                    type: pointInfo.point.properties.type,
+                    text: pointInfo.point.properties.message,
+                    distance: pointInfo.distance,
+                    node: currentNode,
+                    point: pointInfo.point
+                });
+            });
+            
             if (currentNode.route !== nextNode.route) {
                 instructions.push({
                     type: 'route_change',
@@ -587,17 +1144,6 @@ const routingSystem = {
                     node: nextNode
                 });
             }
-            
-            const pointsOfInterest = this.getPointsOfInterestNearNode(nextNode, 10);
-            pointsOfInterest.forEach(point => {
-                instructions.push({
-                    type: point.type,
-                    text: this.getPointInstruction(point),
-                    distance: segmentDistance,
-                    node: nextNode,
-                    point: point
-                });
-            });
             
             routeCoordinates.push([currentNode.lat, currentNode.lng]);
         }
@@ -620,7 +1166,8 @@ const routingSystem = {
             usesMainPaths: true,
             pathLength: routeNodes.length,
             instructions: instructions,
-            nodes: routeNodes
+            nodes: routeNodes,
+            nearbyPoints: nearbyPoints
         };
     },
     
@@ -695,7 +1242,7 @@ const routingSystem = {
     }
 };
 
-// --- 5. SISTEMA DE NAVEGACIÓN EN TIEMPO REAL ---
+// --- 8. SISTEMA DE NAVEGACIÓN EN TIEMPO REAL ---
 const navigationSystem = {
     currentRoute: null,
     currentInstructionIndex: -1,
@@ -715,10 +1262,33 @@ const navigationSystem = {
         this.isNavigating = true;
         appState.navigationActive = true;
         
+        // Reiniciar puntos anunciados para nueva navegación
+        pointsSystem.resetAnnouncedPoints();
+        
         console.log('Iniciando navegación con instrucciones:', route.instructions);
         
         const locationSource = manualLocationSystem.isActive ? "ubicación manual" : "GPS";
-        voiceGuide.speak(`Navegación iniciada desde ${locationSource}. ${route.instructions.length} instrucciones hasta ${destinationName}. Distancia total: ${Math.round(route.distance)} metros.`);
+        
+        // Informar sobre puntos de interés en la ruta
+        if (route.nearbyPoints && route.nearbyPoints.length > 0) {
+            const highPriorityPoints = route.nearbyPoints.filter(p => 
+                p.point.properties.priority === 'high'
+            ).length;
+            
+            voiceGuide.speak(
+                `Navegación iniciada desde ${locationSource}. ` +
+                `${route.instructions.length} instrucciones hasta ${destinationName}. ` +
+                `Distancia total: ${Math.round(route.distance)} metros. ` +
+                `Encontrará ${route.nearbyPoints.length} puntos de interés en el camino, ` +
+                `${highPriorityPoints} de ellos requieren especial atención.`
+            );
+        } else {
+            voiceGuide.speak(
+                `Navegación iniciada desde ${locationSource}. ` +
+                `${route.instructions.length} instrucciones hasta ${destinationName}. ` +
+                `Distancia total: ${Math.round(route.distance)} metros.`
+            );
+        }
         
         setTimeout(() => {
             this.giveNextInstruction();
@@ -770,7 +1340,10 @@ const navigationSystem = {
         if (!this.isNavigating || !this.currentRoute) return;
         
         this.lastUserLocation = userLocation;
-        this.checkProximityToPoints(userLocation);
+        
+        // Verificar proximidad a puntos de interés
+        pointsSystem.checkProximityToPoints(userLocation, this.currentRoute);
+        
         this.checkRouteDeviation(userLocation);
     },
     
@@ -780,10 +1353,10 @@ const navigationSystem = {
         
         const currentInstruction = this.currentRoute.instructions[this.currentInstructionIndex];
         if (currentInstruction && currentInstruction.point) {
-            const distanceToPoint = routingSystem.calculateDistance(userLocation, currentInstruction.point.coordinates);
+            const distanceToPoint = routingSystem.calculateDistance(userLocation, [currentInstruction.point.geometry.coordinates[1], currentInstruction.point.geometry.coordinates[0]]);
             
             if (distanceToPoint <= 15) {
-                voiceGuide.announcePointOfInterest(currentInstruction.point.type, currentInstruction.point.name);
+                voiceGuide.announcePointOfInterest(currentInstruction.point.properties.type, currentInstruction.point.properties.name);
             }
         }
     },
@@ -830,7 +1403,7 @@ const navigationSystem = {
     }
 };
 
-// --- 6. SISTEMA DE RECONOCIMIENTO DE VOZ ---
+// --- 9. SISTEMA DE RECONOCIMIENTO DE VOZ MEJORADO ---
 const voiceRecognition = {
     recognition: null,
     isListening: false,
@@ -918,64 +1491,56 @@ const voiceRecognition = {
         }
     },
     
-    // Procesar comando de voz
+    // Procesar comando de voz MEJORADO
     processCommand: function(transcript) {
         const command = transcript.toLowerCase().trim();
         console.log('Comando recibido:', command);
         
         voiceGuide.speak(`Entendí: ${command}`);
         
+        // Verificar comandos de modo manual primero
         if (manualLocationSystem.handleVoiceCommand(command)) {
             return;
         }
         
-        if (this.containsAny(command, ['navegar', 'ir', 'dirección', 'llevar', 'rumbo'])) {
+        // Verificar comandos de navegación
+        if (this.isNavigationCommand(command)) {
             this.processNavigationCommand(command);
+            return;
         }
-        else if (this.containsAny(command, ['biblioteca', 'libros', 'estudio'])) {
-            voiceGuide.speak("Navegando hacia la biblioteca");
-            startNavigation('Biblioteca CUC');
-        }
-        else if (this.containsAny(command, ['cafetería', 'comer', 'almorzar', 'comida'])) {
-            voiceGuide.speak("Navegando hacia la cafetería");
-            startNavigation('Central');
-        }
-        else if (this.containsAny(command, ['parking', 'estacionamiento', 'parqueadero', 'coche', 'carro'])) {
-            voiceGuide.speak("Navegando hacia el parqueadero");
-            startNavigation('Parqueaderos zona sur');
-        }
-        else if (this.containsAny(command, ['entrada', 'entrar', 'principal', 'acceso'])) {
-            voiceGuide.speak("Navegando hacia la entrada principal");
-            startNavigation('entrada cl. 58');
-        }
-        else if (this.containsAny(command, ['detener', 'parar', 'cancelar', 'terminar navegación'])) {
+        
+        // Verificar otros comandos
+        if (this.isControlCommand(command, 'detener')) {
             voiceGuide.speak("Deteniendo navegación");
             mapSystem.stopNavigation();
         }
-        else if (this.containsAny(command, ['activar gps', 'encender gps', 'iniciar gps'])) {
+        else if (this.isControlCommand(command, 'gps activar')) {
             voiceGuide.speak("Activando GPS");
             if (!appState.isTracking) {
                 mapSystem.startGPSTracking();
             }
         }
-        else if (this.containsAny(command, ['desactivar gps', 'apagar gps', 'detener gps'])) {
+        else if (this.isControlCommand(command, 'gps desactivar')) {
             voiceGuide.speak("Desactivando GPS");
             if (appState.isTracking) {
                 mapSystem.stopGPSTracking();
             }
         }
-        else if (this.containsAny(command, ['dónde estoy', 'mi ubicación', 'ubicación actual'])) {
+        else if (this.isControlCommand(command, 'ubicación')) {
             this.speakCurrentLocation();
         }
-        else if (this.containsAny(command, ['repetir instrucción', 'repite', 'otra vez'])) {
+        else if (this.isControlCommand(command, 'repetir')) {
             voiceGuide.speak("Repitiendo última instrucción");
             navigationSystem.repeatLastInstruction();
         }
-        else if (this.containsAny(command, ['siguiente instrucción', 'próxima instrucción'])) {
+        else if (this.isControlCommand(command, 'siguiente')) {
             voiceGuide.speak("Avanzando a siguiente instrucción");
             navigationSystem.giveNextInstruction();
         }
-        else if (this.containsAny(command, ['ayuda', 'comandos', 'qué puedo decir'])) {
+        else if (this.isControlCommand(command, 'puntos')) {
+            this.showNearbyPoints();
+        }
+        else if (this.isControlCommand(command, 'ayuda')) {
             this.showVoiceHelp();
         }
         else {
@@ -983,66 +1548,93 @@ const voiceRecognition = {
         }
     },
     
-    // Procesar comandos de navegación complejos
+    // Verificar si es comando de navegación
+    isNavigationCommand: function(command) {
+        return voiceCommandsDictionary.navigate.some(navCommand => 
+            command.includes(navCommand)
+        );
+    },
+    
+    // Verificar si es comando de control
+    isControlCommand: function(command, controlType) {
+        return voiceCommandsDictionary.control[controlType].some(controlCommand => 
+            command.includes(controlCommand)
+        );
+    },
+    
+    // Procesar comandos de navegación MEJORADO
     processNavigationCommand: function(command) {
-        const destinations = {
-            'bloque 1': 'Bloque 1',
-            'bloque 2': 'Bloque 2',
-            'bloque 4': 'bloque 4',
-            'bloque 5': 'Bloque 5',
-            'bloque 6': 'Bloque 6',
-            'bloque 7': 'Bloque 7',
-            'bloque 8': 'bloque 8',
-            'bloque 9': 'Bloque 9',
-            'bloque 10': 'Bloque 10',
-            'bloque 11': 'Bloque 11',
-            'bloque 12': 'Bloque 12',
-            'coliseo': 'Coliseo auditorio',
-            'auditorio': 'Coliseo auditorio',
-            'cancha': 'Cancha multiple',
-            'enfermería': 'Enfermeria',
-            'enfermeria': 'Enfermeria',
-            'creatio': 'Creatio lab',
-            'laboratorio': 'Creatio lab',
-            'multidiomas': 'Multidiomas',
-            'ced': 'CED',
-            'salones': 'salones CUL',
-            'container': 'Container de comida',
-            'gimnasio': 'Gimnasio y salon de baile',
-            'baños': 'Baños de hombres central',
-            'baño': 'Baños de hombres central'
-        };
+        // Extraer el destino del comando
+        let destinationName = this.extractDestinationFromCommand(command);
         
-        let foundDestination = null;
-        
-        for (const [keyword, destination] of Object.entries(destinations)) {
-            if (command.includes(keyword)) {
-                foundDestination = destination;
-                break;
-            }
-        }
-        
-        if (foundDestination) {
-            voiceGuide.speak(`Navegando hacia ${foundDestination}`);
-            startNavigation(foundDestination);
+        if (destinationName) {
+            voiceGuide.speak(`Navegando hacia ${destinationName}`);
+            startNavigation(destinationName);
         } else {
-            const navigationWords = ['navegar', 'ir', 'dirección', 'llevar', 'rumbo', 'a', 'hacia', 'hasta'];
-            const words = command.split(' ');
-            const destinationWords = words.filter(word => !navigationWords.includes(word));
-            
-            if (destinationWords.length > 0) {
-                const potentialDestination = destinationWords.join(' ');
-                voiceGuide.speak(`Buscando ${potentialDestination}`);
-                startNavigation(potentialDestination);
-            } else {
-                voiceGuide.speak("Por favor, especifique a dónde desea navegar. Por ejemplo: 'Navegar a la biblioteca'");
-            }
+            voiceGuide.speak("Por favor, especifique a dónde desea navegar. Por ejemplo: 'Navegar a la biblioteca' o 'Vamos al bloque 5'");
         }
     },
     
-    // Verificar si el texto contiene alguna de las palabras
-    containsAny: function(text, words) {
-        return words.some(word => text.includes(word));
+    // Extraer destino del comando MEJORADO
+    extractDestinationFromCommand: function(command) {
+        // Remover palabras de navegación para aislar el destino
+        let cleanCommand = command;
+        voiceCommandsDictionary.navigate.forEach(navWord => {
+            cleanCommand = cleanCommand.replace(navWord, '').trim();
+        });
+        
+        // Buscar en destinos específicos
+        for (const [key, aliases] of Object.entries(voiceCommandsDictionary.destinations)) {
+            if (aliases.some(alias => cleanCommand.includes(alias))) {
+                const destination = destinationsSystem.findDestination(key);
+                return destination ? destination.name : null;
+            }
+        }
+        
+        // Buscar en bloques
+        for (const [block, aliases] of Object.entries(voiceCommandsDictionary.blocks)) {
+            if (aliases.some(alias => cleanCommand.includes(alias))) {
+                return block;
+            }
+        }
+        
+        // Búsqueda general en todos los destinos
+        const allDestinations = destinationsSystem.getAllDestinations();
+        for (const dest of allDestinations) {
+            if (cleanCommand.includes(dest.name.toLowerCase()) || 
+                cleanCommand.includes(dest.displayName.toLowerCase())) {
+                return dest.name;
+            }
+        }
+        
+        // Si no se encuentra, intentar con el comando completo
+        const destination = destinationsSystem.findDestination(cleanCommand);
+        return destination ? destination.name : null;
+    },
+    
+    // Mostrar puntos cercanos
+    showNearbyPoints: function() {
+        if (!appState.currentLocation) {
+            voiceGuide.speak("No se ha detectado su ubicación actual.");
+            return;
+        }
+        
+        if (!pointsSystem.pointsData) {
+            voiceGuide.speak("Los puntos de interés no están cargados aún.");
+            return;
+        }
+        
+        const nearbyPoints = pointsSystem.getPointsNearRoute([appState.currentLocation], 30);
+        
+        if (nearbyPoints.length === 0) {
+            voiceGuide.speak("No hay puntos de interés cercanos a su ubicación actual.");
+        } else {
+            const pointsInfo = nearbyPoints.slice(0, 3).map(point => 
+                `${point.point.properties.name} a ${Math.round(point.distance)} metros`
+            ).join(', ');
+            
+            voiceGuide.speak(`Puntos cercanos: ${pointsInfo}`);
+        }
     },
     
     // Manejar errores de reconocimiento
@@ -1099,7 +1691,15 @@ const voiceRecognition = {
             - Dónde estoy: Conocer ubicación actual
             - Repetir instrucción: Escuchar la última instrucción
             - Siguiente instrucción: Avanzar a la próxima instrucción
+            - Puntos cercanos: Conocer puntos de interés cercanos
             - Ayuda: Escuchar esta lista de comandos
+
+            Ejemplos de comandos naturales:
+            - "Vamos a la biblioteca"
+            - "Llévame al bloque 5" 
+            - "Necesito ir a enfermería"
+            - "Cómo llego a la cafetería"
+            - "Quiero ir al coliseo"
         `;
         
         voiceGuide.speak(helpText);
@@ -1169,7 +1769,7 @@ const voiceRecognition = {
     }
 };
 
-// --- 7. SISTEMA DE UBICACIÓN MANUAL ---
+// --- 10. SISTEMA DE UBICACIÓN MANUAL ---
 const manualLocationSystem = {
     isActive: false,
     manualMarker: null,
@@ -1368,31 +1968,26 @@ const manualLocationSystem = {
     handleVoiceCommand: function(command) {
         const lowerCommand = command.toLowerCase();
         
-        if (this.containsAny(lowerCommand, ['modo manual', 'ubicación manual', 'establecer ubicación', 'poner ubicación'])) {
+        if (voiceCommandsDictionary.manual['manual activar'].some(cmd => lowerCommand.includes(cmd))) {
             this.toggleManualMode();
             return true;
         }
-        else if (this.containsAny(lowerCommand, ['quitar ubicación', 'eliminar ubicación', 'limpiar ubicación'])) {
-            this.clearManualLocation();
-            return true;
-        }
-        else if (this.containsAny(lowerCommand, ['desactivar manual', 'salir manual'])) {
+        else if (voiceCommandsDictionary.manual['manual desactivar'].some(cmd => lowerCommand.includes(cmd))) {
             if (this.isActive) {
                 this.toggleManualMode();
             }
             return true;
         }
+        else if (voiceCommandsDictionary.control['detener'].some(cmd => lowerCommand.includes(cmd)) && lowerCommand.includes('ubicación')) {
+            this.clearManualLocation();
+            return true;
+        }
         
         return false;
-    },
-    
-    // Verificar si el texto contiene alguna de las palabras
-    containsAny: function(text, words) {
-        return words.some(word => text.includes(word));
     }
 };
 
-// --- 8. SISTEMA DE MAPAS ACTUALIZADO ---
+// --- 11. SISTEMA DE MAPAS ACTUALIZADO ---
 const mapSystem = {
     map: null,
     campusData: null,
@@ -1406,6 +2001,7 @@ const mapSystem = {
     routeLayer: null,
     mainRouteLayer: null,
     userLocationLayer: null,
+    pointsLayer: null,
 
     // Inicializar el mapa
     initMap: function() {
@@ -1417,6 +2013,9 @@ const mapSystem = {
         }).addTo(this.map);
 
         this.loadCampusGeoJSON();
+        
+        // Inicializar sistema de puntos
+        pointsSystem.loadPointsData();
         
         if (appState.settings.useGPS) {
             this.initGPS();
@@ -1625,14 +2224,9 @@ const mapSystem = {
 
     // Proporcionar feedback sobre proximidad a rutas
     provideRouteProximityFeedback: function(location) {
-        if (routingSystem.isNearMainRoute(location, 20)) {
-            if (Math.random() < 0.1) {
-                voiceGuide.speak("Estás en la ruta principal del campus");
-            }
-        } else if (routingSystem.isNearMainRoute(location, 50)) {
-            if (Math.random() < 0.05) {
-                voiceGuide.speak("Ruta principal cercana, dirígete hacia la línea verde en el mapa");
-            }
+        // Esta función puede expandirse para dar feedback sobre rutas principales
+        if (Math.random() < 0.1) {
+            // Ocasionalmente dar feedback sobre la ubicación
         }
     },
 
@@ -1708,9 +2302,7 @@ const mapSystem = {
                 this.calculateRoute(appState.currentLocation, center);
             }
 
-            const routeInfo = routingSystem.isNearMainRoute(center) ? 
-                "Ubicado en ruta principal. " : 
-                "Dirígete hacia la ruta principal verde. ";
+            const routeInfo = "Calculando ruta óptima con Dijkstra...";
                 
             voiceGuide.speak(`Destino establecido: ${destinationName}. ${routeInfo} ${appState.currentLocation ? 'Calculando ruta óptima con Dijkstra...' : 'Active el GPS o use el modo manual para establecer su ubicación.'}`);
             
@@ -1769,10 +2361,10 @@ const mapSystem = {
     }
 };
 
-// --- 9. FUNCIONES DE RENDERIZADO Y ACTUALIZACIÓN ---
+// --- 12. FUNCIONES DE RENDERIZADO MEJORADAS ---
 
 /**
- * Dibuja los botones de acceso rápido en el DOM.
+ * Dibuja los botones de acceso rápido en el DOM con categorías
  */
 function renderQuickAccessButtons() {
     const container = document.getElementById('quick-access-buttons');
@@ -1780,29 +2372,189 @@ function renderQuickAccessButtons() {
 
     const highContrast = appState.settings.highContrastMode;
 
-    container.innerHTML = appState.quickDestinations.map(dest => {
-        const iconColor = highContrast ? 'text-yellow-500' : 'text-red-600';
-        const buttonClasses = highContrast 
-            ? 'bg-gray-800 border-yellow-500 text-yellow-300 hover:bg-gray-700'
-            : 'bg-white border-gray-200 text-gray-700 hover:bg-red-50 hover:border-red-300';
+    container.innerHTML = `
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 w-full">
+            ${appState.quickDestinations.map(dest => {
+                const iconColor = highContrast ? 'text-yellow-500' : 'text-red-600';
+                const buttonClasses = highContrast 
+                    ? 'bg-gray-800 border-yellow-500 text-yellow-300 hover:bg-gray-700'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-red-50 hover:border-red-300';
+                
+                return `
+                    <button 
+                        data-action="${dest.action}"
+                        class="quick-access-btn flex items-center justify-center p-3 sm:p-4 border rounded-xl shadow-md transition-all text-sm font-semibold w-full h-16 sm:h-20 text-center ${buttonClasses} hover:scale-105 transform transition-transform"
+                        aria-label="Acceso rápido a ${dest.name}"
+                    >
+                        <div class="flex flex-col sm:flex-row items-center gap-1 sm:gap-2">
+                            <i data-lucide="${dest.icon}" class="w-4 h-4 sm:w-5 sm:h-5 ${iconColor}"></i>
+                            <span class="text-xs sm:text-sm">${dest.name}</span>
+                        </div>
+                    </button>
+                `;
+            }).join('')}
+        </div>
         
-        return `
+        <!-- Botón para ver todos los destinos -->
+        <div class="mt-4 sm:mt-6">
             <button 
-                data-action="${dest.action}"
-                class="quick-access-btn flex items-center justify-center p-3 sm:p-4 border rounded-xl shadow-md transition-all text-sm font-semibold w-full h-16 sm:h-20 text-center ${buttonClasses}"
-                aria-label="Acceso rápido a ${dest.name}"
+                id="show-all-destinations"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 px-4 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                onclick="showAllDestinationsModal()"
             >
-                <div class="flex flex-col sm:flex-row items-center">
-                    <i data-lucide="${dest.icon}" class="w-5 h-5 sm:w-6 sm:h-6 mb-1 sm:mb-0 sm:mr-2 ${iconColor}"></i>
-                    <span>${dest.name}</span>
-                </div>
+                <i data-lucide="search" class="w-4 h-4"></i>
+                Ver todos los destinos
             </button>
-        `;
-    }).join('');
+        </div>
+    `;
     
     if (window.lucide && window.lucide.createIcons) {
         window.lucide.createIcons();
     }
+}
+
+/**
+ * Muestra modal con todos los destinos organizados por categorías
+ */
+function showAllDestinationsModal() {
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+            <div class="p-4 sm:p-6 border-b border-gray-200">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-lg sm:text-xl font-bold text-gray-900">Todos los Destinos</h3>
+                    <button onclick="this.closest('.fixed').remove()" class="text-gray-500 hover:text-gray-700">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
+                </div>
+                <div class="mt-2 relative">
+                    <input 
+                        type="text" 
+                        id="destination-search"
+                        placeholder="Buscar destino..."
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                    <i data-lucide="search" class="absolute right-3 top-3 w-4 h-4 text-gray-400"></i>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto max-h-[60vh] p-4 sm:p-6 destinations-scroll">
+                <div id="destinations-container">
+                    ${renderDestinationsByCategory()}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Inicializar iconos
+    if (window.lucide && window.lucide.createIcons) {
+        window.lucide.createIcons();
+    }
+    
+    // Configurar búsqueda
+    const searchInput = document.getElementById('destination-search');
+    searchInput.addEventListener('input', function(e) {
+        filterDestinations(e.target.value);
+    });
+    
+    // Cerrar modal al hacer click fuera
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+/**
+ * Renderiza destinos por categoría
+ */
+function renderDestinationsByCategory() {
+    return destinationsSystem.categories.map(category => `
+        <div class="mb-6">
+            <div class="flex items-center gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
+                <i data-lucide="${category.icon}" class="w-5 h-5 text-blue-600"></i>
+                <h4 class="font-semibold text-gray-900">${category.name}</h4>
+                <span class="ml-auto text-sm text-gray-500 bg-white px-2 py-1 rounded">
+                    ${category.items.length}
+                </span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                ${category.items.map(item => `
+                    <button 
+                        onclick="selectDestinationFromModal('${item.name}')"
+                        class="text-left p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors w-full"
+                    >
+                        <div class="font-medium text-gray-900 text-sm">${item.displayName}</div>
+                        <div class="text-xs text-gray-500 mt-1">${category.name.replace(/[🚪🏫🏥⚽🅿️🌳🚻]/g, '')}</div>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * Filtrar destinos en el modal
+ */
+function filterDestinations(searchTerm) {
+    const container = document.getElementById('destinations-container');
+    const term = searchTerm.toLowerCase().trim();
+    
+    if (!term) {
+        container.innerHTML = renderDestinationsByCategory();
+        if (window.lucide && window.lucide.createIcons) {
+            window.lucide.createIcons();
+        }
+        return;
+    }
+    
+    const allDestinations = destinationsSystem.getAllDestinations();
+    const filtered = allDestinations.filter(dest => 
+        dest.name.toLowerCase().includes(term) ||
+        dest.displayName.toLowerCase().includes(term) ||
+        dest.category.toLowerCase().includes(term)
+    );
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8">
+                <i data-lucide="search-x" class="w-12 h-12 text-gray-400 mx-auto mb-4"></i>
+                <p class="text-gray-500">No se encontraron destinos</p>
+            </div>
+        `;
+    } else {
+        container.innerHTML = `
+            <div class="mb-4">
+                <h4 class="font-semibold text-gray-900 mb-3">Resultados de búsqueda (${filtered.length})</h4>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    ${filtered.map(dest => `
+                        <button 
+                            onclick="selectDestinationFromModal('${dest.name}')"
+                            class="text-left p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors w-full"
+                        >
+                            <div class="font-medium text-gray-900 text-sm">${dest.displayName}</div>
+                            <div class="text-xs text-gray-500 mt-1">${dest.category}</div>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    if (window.lucide && window.lucide.createIcons) {
+        window.lucide.createIcons();
+    }
+}
+
+/**
+ * Seleccionar destino desde el modal
+ */
+function selectDestinationFromModal(destinationName) {
+    document.querySelector('.fixed').remove();
+    startNavigation(destinationName);
 }
 
 /**
@@ -1923,7 +2675,7 @@ function updateUI() {
     applyHighContrastStyles();
 }
 
-// --- 10. MANEJO DE EVENTOS ---
+// --- 13. MANEJO DE EVENTOS ---
 
 /**
  * Alterna el estado de una opción de accesibilidad y actualiza la UI.
@@ -1983,41 +2735,26 @@ function startNavigation(destination) {
     }
 }
 
-// --- 11. FUNCIONES DE DEBUGGING ---
-
-/**
- * Función de prueba para verificar que Dijkstra esté funcionando
- */
-function testDijkstra() {
-    if (!routingSystem.campusGraph) {
-        console.log("Grafo no cargado aún");
-        return;
-    }
-    
-    const graphInfo = routingSystem.getGraphInfo();
-    console.log("Información del grafo:", graphInfo);
-    
-    const startNode = routingSystem.campusGraph.nodes[0];
-    const endNode = routingSystem.campusGraph.nodes[Math.min(30, routingSystem.campusGraph.nodes.length - 1)];
-    
-    if (startNode && endNode) {
-        console.log(`Probando Dijkstra del nodo ${startNode.id} al ${endNode.id}`);
-        const path = routingSystem.findPathInGraph(startNode.id, endNode.id);
-        console.log("Camino encontrado:", path);
-        
-        if (path) {
-            const distance = routingSystem.calculateRouteDistance(path.map(id => routingSystem.campusGraph.nodes[id].coord));
-            console.log(`Distancia total: ${Math.round(distance)} metros`);
-        }
-    }
-}
-
-// --- 12. INICIALIZACIÓN ---
+// --- 14. INICIALIZACIÓN ---
 
 document.addEventListener('DOMContentLoaded', () => {
     updateUI();
     
-    mapSystem.initMap();
+    // Cargar datos del edificio primero para inicializar destinos
+    fetch('map.geojson')
+        .then(response => response.json())
+        .then(data => {
+            appState.buildingData = data;
+            destinationsSystem.init(data);
+            renderQuickAccessButtons();
+            
+            // Inicializar mapa después de cargar destinos
+            mapSystem.initMap();
+        })
+        .catch(error => {
+            console.error('Error cargando datos de edificios:', error);
+            mapSystem.initMap();
+        });
     
     if (voiceRecognition.init()) {
         console.log('Reconocimiento de voz inicializado correctamente');
@@ -2030,7 +2767,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if(appState.settings.isVoiceActive) {
             const welcomeMessage = `
                 Bienvenido a UniNav. Sistema de navegación accesible cargado. 
-                Puede usar comandos de voz para navegar o establecer su ubicación manualmente.
+                Puede usar comandos de voz como 'Vamos a la biblioteca', 'Llévame al bloque 5' o 'Necesito ir a enfermería'.
                 Diga 'modo manual' para activar la ubicación manual o 'ayuda' para más comandos.
             `;
             voiceGuide.speak(welcomeMessage);
@@ -2100,6 +2837,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.testDijkstra = testDijkstra;
     window.voiceRecognition = voiceRecognition;
     window.manualLocationSystem = manualLocationSystem;
+    window.showAllDestinationsModal = showAllDestinationsModal;
+    window.selectDestinationFromModal = selectDestinationFromModal;
 
     window.setManualLocation = function(lat, lng) {
         manualLocationSystem.toggleManualMode();
@@ -2109,7 +2848,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 });
 
-// --- 13. ESTILOS CSS ---
+// --- 15. ESTILOS CSS ---
 const appStyles = `
     .manual-location-marker {
         z-index: 1000;
@@ -2147,6 +2886,133 @@ const appStyles = `
     #voice-command-button.listening {
         background-color: #10b981 !important;
         animation: pulse 1.5s infinite;
+    }
+
+    /* Estilos para puntos de interés */
+    .point-marker {
+        z-index: 500;
+    }
+    
+    .point-marker.highlighted {
+        z-index: 1000;
+    }
+    
+    .point-notification {
+        animation: slideInRight 0.3s ease-out;
+    }
+    
+    @keyframes slideInRight {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    .animate-fade-in {
+        animation: fadeIn 0.3s ease-in;
+    }
+    
+    .animate-fade-out {
+        animation: fadeOut 0.3s ease-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    @keyframes fadeOut {
+        from { opacity: 1; }
+        to { opacity: 0; }
+    }
+    
+    /* Colores para los puntos */
+    .border-red-500 { border-color: #ef4444; }
+    .border-green-500 { border-color: #10b981; }
+    .border-yellow-500 { border-color: #f59e0b; }
+    .border-blue-500 { border-color: #3b82f6; }
+    
+    .bg-red-50 { background-color: #fef2f2; }
+    .bg-yellow-50 { background-color: #fefce8; }
+    .bg-blue-50 { background-color: #eff6ff; }
+    
+    .text-red-800 { color: #991b1b; }
+    .text-yellow-800 { color: #92400e; }
+    .text-blue-800 { color: #1e40af; }
+    
+    .text-red-600 { color: #dc2626; }
+    .text-yellow-600 { color: #d97706; }
+    .text-blue-600 { color: #2563eb; }
+    
+    .bg-red-500 { background-color: #ef4444; }
+    .bg-green-500 { background-color: #10b981; }
+    .bg-yellow-500 { background-color: #f59e0b; }
+    .bg-blue-500 { background-color: #3b82f6; }
+    
+    .bg-red-100 { background-color: #fee2e2; }
+    .bg-yellow-100 { background-color: #fef3c7; }
+    .bg-blue-100 { background-color: #dbeafe; }
+
+    /* Estilos para el modal de destinos */
+    .destination-modal {
+        animation: slideUp 0.3s ease-out;
+    }
+    
+    @keyframes slideUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Mejoras responsive */
+    @media (max-width: 640px) {
+        .quick-access-btn {
+            padding: 12px 8px;
+        }
+        
+        .destination-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    @media (min-width: 641px) and (max-width: 1024px) {
+        .destination-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    
+    /* Efectos hover mejorados */
+    .quick-access-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Scroll personalizado */
+    .destinations-scroll::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    .destinations-scroll::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+    
+    .destinations-scroll::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+    
+    .destinations-scroll::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
     }
 `;
 
