@@ -62,11 +62,11 @@ const voiceCommandsDictionary = {
     blocks: {
         'Bloque 1': ['bloque 1', 'bloque uno', 'edificio 1', 'edificio uno', 'bloque uno'],
         'Bloque 2': ['bloque 2', 'bloque dos', 'edificio 2', 'edificio dos', 'bloque dos'],
-        'bloque 4': ['bloque 4', 'bloque cuatro', 'edificio 4', 'edificio cuatro', 'bloque cuatro'],
+        'Bloque 4': ['bloque 4', 'bloque cuatro', 'edificio 4', 'edificio cuatro', 'bloque cuatro'],
         'Bloque 5': ['bloque 5', 'bloque cinco', 'edificio 5', 'edificio cinco', 'bloque cinco'],
         'Bloque 6': ['bloque 6', 'bloque seis', 'edificio 6', 'edificio seis', 'bloque seis'],
         'Bloque 7': ['bloque 7', 'bloque siete', 'edificio 7', 'edificio siete', 'bloque siete'],
-        'bloque 8': ['bloque 8', 'bloque ocho', 'edificio 8', 'edificio ocho', 'bloque ocho'],
+        'Bloque 8': ['bloque 8', 'bloque ocho', 'edificio 8', 'edificio ocho', 'bloque ocho'],
         'Bloque 9': ['bloque 9', 'bloque nueve', 'edificio 9', 'edificio nueve', 'bloque nueve'],
         'Bloque 10': ['bloque 10', 'bloque diez', 'edificio 10', 'edificio diez', 'bloque diez'],
         'Bloque 11': ['bloque 11', 'bloque once', 'edificio 11', 'edificio once', 'bloque once'],
@@ -179,7 +179,7 @@ const destinationsSystem = {
         this.generateQuickDestinations();
     },
 
-    // Extraer bloques de los datos del edificio
+    // Extraer bloques de los datos del edificio - CORREGIDO
     extractBlocksFromData: function(buildingData) {
         const blocksCategory = this.categories.find(cat => cat.id === 'bloques');
         if (!blocksCategory) return;
@@ -187,10 +187,15 @@ const destinationsSystem = {
         blocksCategory.items = [];
         
         buildingData.features.forEach(feature => {
-            const name = Object.keys(feature.properties)[0];
+            const name = feature.properties.name;
             if (name && name.toLowerCase().includes('bloque')) {
-                const blockNumber = name.match(/\d+/);
-                const displayName = blockNumber ? `Bloque ${blockNumber[0]}` : name;
+                // Extraer número del bloque
+                const blockMatch = name.match(/bloque\s*(\d+)/i);
+                let displayName = name;
+                
+                if (blockMatch) {
+                    displayName = `Bloque ${blockMatch[1]}`;
+                }
                 
                 blocksCategory.items.push({
                     name: name,
@@ -205,6 +210,8 @@ const destinationsSystem = {
             const numB = parseInt(b.displayName.match(/\d+/)) || 0;
             return numA - numB;
         });
+
+        console.log('Bloques cargados:', blocksCategory.items);
     },
 
     // Generar destinos rápidos
@@ -796,7 +803,7 @@ const routingSystem = {
             .then(response => response.json())
             .then(data => {
                 data.features.forEach(building => {
-                    const name = Object.keys(building.properties)[0];
+                    const name = building.properties.name;
                     const center = this.getPolygonCenter(building.geometry.coordinates[0]);
                     this.buildingLocations[name] = center;
                 });
@@ -2099,7 +2106,7 @@ const mapSystem = {
     displayCampusMap: function(geojsonData) {
         const buildingLayer = L.geoJSON(geojsonData, {
             style: function(feature) {
-                const isSelected = appState.selectedDestination === Object.keys(feature.properties)[0];
+                const isSelected = appState.selectedDestination === feature.properties.name;
                 return {
                     fillColor: isSelected ? '#ef4444' : '#3b82f6',
                     color: isSelected ? '#dc2626' : '#1d4ed8',
@@ -2109,7 +2116,7 @@ const mapSystem = {
                 };
             },
             onEachFeature: function(feature, layer) {
-                const name = Object.keys(feature.properties)[0] || 'Edificio';
+                const name = feature.properties.name;
                 layer.bindPopup(`
                     <div class="p-2">
                         <h3 class="font-bold text-lg">${name}</h3>
@@ -2276,7 +2283,7 @@ const mapSystem = {
         appState.selectedDestination = destinationName;
         
         const building = this.campusData.features.find(feature => 
-            Object.keys(feature.properties)[0] === destinationName
+            feature.properties.name === destinationName
         );
 
         if (building) {
@@ -2356,7 +2363,7 @@ const mapSystem = {
     findLocationByName: function(name) {
         if (!this.campusData) return null;
         return this.campusData.features.find(feature => 
-            Object.keys(feature.properties)[0].toLowerCase().includes(name.toLowerCase())
+            feature.properties.name.toLowerCase().includes(name.toLowerCase())
         );
     }
 };
@@ -2724,7 +2731,7 @@ function startNavigation(destination) {
     const location = mapSystem.findLocationByName(destination);
     
     if (location) {
-        const locationName = Object.keys(location.properties)[0];
+        const locationName = location.properties.name;
         mapSystem.setDestination(locationName);
         
         if (!appState.isTracking && appState.settings.useGPS) {
