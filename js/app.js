@@ -179,39 +179,56 @@ const destinationsSystem = {
         this.generateQuickDestinations();
     },
 
-    // Extraer bloques de los datos del edificio - CORREGIDO
+    // CORREGIDO - Extraer bloques de los datos del edificio SIN DUPLICADOS
     extractBlocksFromData: function(buildingData) {
         const blocksCategory = this.categories.find(cat => cat.id === 'bloques');
         if (!blocksCategory) return;
 
         blocksCategory.items = [];
+        const uniqueBlocks = new Set();
         
         buildingData.features.forEach(feature => {
             const name = feature.properties.name;
             if (name && name.toLowerCase().includes('bloque')) {
-                // Extraer número del bloque
+                // Extraer número del bloque y crear nombre consistente
                 const blockMatch = name.match(/bloque\s*(\d+)/i);
                 let displayName = name;
                 
                 if (blockMatch) {
-                    displayName = `Bloque ${blockMatch[1]}`;
+                    const blockNumber = blockMatch[1];
+                    displayName = `Bloque ${blockNumber}`;
+                    
+                    // Evitar duplicados usando el número como clave
+                    if (!uniqueBlocks.has(blockNumber)) {
+                        uniqueBlocks.add(blockNumber);
+                        
+                        blocksCategory.items.push({
+                            name: name,
+                            displayName: displayName,
+                            blockNumber: parseInt(blockNumber)
+                        });
+                    }
+                } else {
+                    // Para bloques sin número, usar el nombre completo
+                    if (!uniqueBlocks.has(name)) {
+                        uniqueBlocks.add(name);
+                        blocksCategory.items.push({
+                            name: name,
+                            displayName: displayName
+                        });
+                    }
                 }
-                
-                blocksCategory.items.push({
-                    name: name,
-                    displayName: displayName
-                });
             }
         });
 
         // Ordenar bloques numéricamente
         blocksCategory.items.sort((a, b) => {
-            const numA = parseInt(a.displayName.match(/\d+/)) || 0;
-            const numB = parseInt(b.displayName.match(/\d+/)) || 0;
+            const numA = a.blockNumber || parseInt(a.displayName.match(/\d+/)) || 0;
+            const numB = b.blockNumber || parseInt(b.displayName.match(/\d+/)) || 0;
             return numA - numB;
         });
 
-        console.log('Bloques cargados:', blocksCategory.items);
+        console.log('Bloques cargados sin duplicados:', blocksCategory.items);
     },
 
     // Generar destinos rápidos
@@ -294,48 +311,81 @@ const destinationsSystem = {
 const voiceGuide = {
     isSpeaking: false,
     lastInstruction: '',
+    speechQueue: [],
+    isProcessingQueue: false,
     
-    // Función para iniciar la lectura de un texto
+    // Cola de mensajes para evitar superposición
     speak: (text, priority = false) => {
-        // Solo hablar si la guía está activa
         if (!appState.settings.isVoiceActive) return;
         
         // No repetir la misma instrucción inmediatamente
         if (text === voiceGuide.lastInstruction && !priority) return;
 
+        // Limitar longitud del texto para evitar mensajes largos
+        const maxLength = 200;
+        const truncatedText = text.length > maxLength ? 
+            text.substring(0, maxLength) + '...' : text;
+
         if ('speechSynthesis' in window) {
+            // Cancelar solo si no es prioridad alta
             if (voiceGuide.isSpeaking && !priority) {
                 window.speechSynthesis.cancel();
             }
             
-            const utterance = new SpeechSynthesisUtterance(text);
+            const utterance = new SpeechSynthesisUtterance(truncatedText);
             utterance.lang = 'es-ES';
             utterance.rate = 0.9;
             utterance.volume = 1.0;
+            utterance.pitch = 1.0;
 
             utterance.onstart = () => { 
                 voiceGuide.isSpeaking = true; 
-                voiceGuide.lastInstruction = text;
+                voiceGuide.lastInstruction = truncatedText;
             };
+            
             utterance.onend = () => { 
-                voiceGuide.isSpeaking = false; 
+                voiceGuide.isSpeaking = false;
+                voiceGuide.processNextInQueue();
             };
+            
             utterance.onerror = (e) => { 
                 console.error('Error TTS:', e); 
                 voiceGuide.isSpeaking = false;
+                voiceGuide.processNextInQueue();
             };
 
-            if (priority) {
+            if (priority || !voiceGuide.isSpeaking) {
                 window.speechSynthesis.speak(utterance);
             } else {
-                window.speechSynthesis.cancel();
-                setTimeout(() => {
-                    window.speechSynthesis.speak(utterance);
-                }, 100);
+                voiceGuide.addToQueue(utterance);
             }
         } else {
             console.warn("La API de Síntesis de Voz no es compatible.");
         }
+    },
+    
+    // Sistema de cola para mensajes
+    addToQueue: function(utterance) {
+        this.speechQueue.push(utterance);
+        if (!this.isProcessingQueue) {
+            this.processNextInQueue();
+        }
+    },
+    
+    processNextInQueue: function() {
+        if (this.speechQueue.length > 0 && !this.isSpeaking) {
+            this.isProcessingQueue = true;
+            const nextUtterance = this.speechQueue.shift();
+            window.speechSynthesis.speak(nextUtterance);
+        } else {
+            this.isProcessingQueue = false;
+        }
+    },
+    
+    // Limpiar cola
+    clearQueue: function() {
+        this.speechQueue = [];
+        this.isProcessingQueue = false;
     },
     
     // Función para detener la lectura
@@ -343,13 +393,14 @@ const voiceGuide = {
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
             voiceGuide.isSpeaking = false;
+            voiceGuide.clearQueue();
         }
     },
     
-    // Instrucciones de navegación específicas
+    // Función mejorada para instrucciones de navegación
     giveNavigationInstruction: function(instruction, distance = null) {
         let fullInstruction = instruction;
-        if (distance !== null) {
+        if (distance !== null && distance > 5) {
             fullInstruction += `. En aproximadamente ${Math.round(distance)} metros`;
         }
         this.speak(fullInstruction, true);
@@ -770,6 +821,7 @@ const routingSystem = {
     allRoutes: [],
     routePoints: {},
     buildingLocations: {},
+    obstacleAreas: [],
     
     // Inicializar sistema de rutas
     init: function() {
@@ -845,15 +897,19 @@ const routingSystem = {
         });
     },
     
-    // Construir grafo completo con todas las rutas
+    // MEJORADO: Construir grafo evitando edificios
     buildCompleteGraph: function() {
         this.campusGraph = {
             nodes: [],
             edges: [],
-            nodeMap: new Map()
+            nodeMap: new Map(),
+            obstacleNodes: new Set() // Nuevo: nodos cerca de obstáculos
         };
         
         let nodeId = 0;
+        
+        // Primero identificar áreas de edificios (obstáculos)
+        this.identifyObstacleAreas();
         
         this.allRoutes.forEach(route => {
             const coordinates = route.geometry.coordinates;
@@ -862,18 +918,28 @@ const routingSystem = {
             
             const routeNodes = [];
             coordinates.forEach((coord, index) => {
+                const point = [coord[1], coord[0]];
+                
+                // Verificar si el punto está cerca de un obstáculo
+                const isNearObstacle = this.isPointNearObstacle(point);
+                
                 const node = {
                     id: nodeId++,
                     lat: coord[1],
                     lng: coord[0],
-                    coord: [coord[1], coord[0]],
+                    coord: point,
                     route: routeName,
                     routeType: routeType,
-                    isEndpoint: index === 0 || index === coordinates.length - 1
+                    isEndpoint: index === 0 || index === coordinates.length - 1,
+                    isNearObstacle: isNearObstacle // Nuevo: marca nodos problemáticos
                 };
                 
                 this.campusGraph.nodes.push(node);
                 routeNodes.push(node);
+                
+                if (isNearObstacle) {
+                    this.campusGraph.obstacleNodes.add(node.id);
+                }
                 
                 const key = `${coord[1].toFixed(6)},${coord[0].toFixed(6)}`;
                 if (!this.campusGraph.nodeMap.has(key)) {
@@ -882,15 +948,23 @@ const routingSystem = {
                 this.campusGraph.nodeMap.get(key).push(node);
             });
             
+            // Crear conexiones entre nodos de la misma ruta
             for (let i = 1; i < routeNodes.length; i++) {
                 const prevNode = routeNodes[i - 1];
                 const currentNode = routeNodes[i];
                 const distance = this.calculateDistance(prevNode.coord, currentNode.coord);
                 
+                // Penalizar segmentos cerca de obstáculos
+                let cost = distance;
+                if (prevNode.isNearObstacle || currentNode.isNearObstacle) {
+                    cost *= 2; // Penalización por estar cerca de obstáculos
+                }
+                
                 this.campusGraph.edges.push({
                     from: prevNode.id,
                     to: currentNode.id,
                     distance: distance,
+                    cost: cost, // Nuevo: costo ajustado
                     route: routeName,
                     routeType: routeType,
                     bidirectional: true
@@ -900,6 +974,7 @@ const routingSystem = {
                     from: currentNode.id,
                     to: prevNode.id,
                     distance: distance,
+                    cost: cost,
                     route: routeName,
                     routeType: routeType,
                     bidirectional: true
@@ -908,6 +983,126 @@ const routingSystem = {
         });
         
         this.createIntersections();
+    },
+    
+    // Identificar áreas de obstáculos (edificios)
+    identifyObstacleAreas: function() {
+        this.obstacleAreas = [];
+        
+        if (!appState.buildingData) return;
+        
+        appState.buildingData.features.forEach(building => {
+            if (building.properties.obstacle === true || 
+                building.properties.routing === 'avoid') {
+                
+                const coordinates = building.geometry.coordinates[0];
+                const obstacleArea = {
+                    type: 'building',
+                    name: building.properties.name,
+                    polygon: coordinates.map(coord => [coord[1], coord[0]]),
+                    bounds: this.calculatePolygonBounds(coordinates)
+                };
+                
+                this.obstacleAreas.push(obstacleArea);
+            }
+        });
+    },
+    
+    // Calcular límites de polígono
+    calculatePolygonBounds: function(coordinates) {
+        let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+        
+        coordinates.forEach(coord => {
+            const lat = coord[1];
+            const lng = coord[0];
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            minLng = Math.min(minLng, lng);
+            maxLng = Math.max(maxLng, lng);
+        });
+        
+        return { minLat, maxLat, minLng, maxLng };
+    },
+    
+    // Verificar si un punto está cerca de un obstáculo
+    isPointNearObstacle: function(point, threshold = 15) {
+        for (const obstacle of this.obstacleAreas) {
+            if (this.isPointInPolygon(point, obstacle.polygon)) {
+                return true;
+            }
+            
+            // Verificar proximidad al borde del polígono
+            if (this.distanceToPolygon(point, obstacle.polygon) < threshold) {
+                return true;
+            }
+        }
+        return false;
+    },
+    
+    // Verificar si punto está dentro de polígono
+    isPointInPolygon: function(point, polygon) {
+        const x = point[0], y = point[1];
+        let inside = false;
+        
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i][0], yi = polygon[i][1];
+            const xj = polygon[j][0], yj = polygon[j][1];
+            
+            const intersect = ((yi > y) !== (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            
+            if (intersect) inside = !inside;
+        }
+        
+        return inside;
+    },
+    
+    // Calcular distancia a un polígono
+    distanceToPolygon: function(point, polygon) {
+        let minDistance = Infinity;
+        
+        for (let i = 0; i < polygon.length; i++) {
+            const p1 = polygon[i];
+            const p2 = polygon[(i + 1) % polygon.length];
+            const distance = this.pointToLineDistance(point, p1, p2);
+            minDistance = Math.min(minDistance, distance);
+        }
+        
+        return minDistance;
+    },
+    
+    // Calcular distancia de punto a línea
+    pointToLineDistance: function(point, lineStart, lineEnd) {
+        const A = point[0] - lineStart[0];
+        const B = point[1] - lineStart[1];
+        const C = lineEnd[0] - lineStart[0];
+        const D = lineEnd[1] - lineStart[1];
+
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        let param = -1;
+        
+        if (lenSq !== 0) {
+            param = dot / lenSq;
+        }
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = lineStart[0];
+            yy = lineStart[1];
+        } else if (param > 1) {
+            xx = lineEnd[0];
+            yy = lineEnd[1];
+        } else {
+            xx = lineStart[0] + param * C;
+            yy = lineStart[1] + param * D;
+        }
+
+        const dx = point[0] - xx;
+        const dy = point[1] - yy;
+        
+        return Math.sqrt(dx * dx + dy * dy) * 111320; // Convertir a metros
     },
     
     // Clasificar rutas por tipo
@@ -938,6 +1133,7 @@ const routingSystem = {
                         from: node1.id,
                         to: node2.id,
                         distance: distance,
+                        cost: distance,
                         route: 'connection',
                         routeType: 'connection',
                         bidirectional: true
@@ -947,6 +1143,7 @@ const routingSystem = {
                         from: node2.id,
                         to: node1.id,
                         distance: distance,
+                        cost: distance,
                         route: 'connection',
                         routeType: 'connection',
                         bidirectional: true
@@ -958,39 +1155,43 @@ const routingSystem = {
         });
     },
     
-    // ALGORITMO DE DIJKSTRA MEJORADO
+    // ALGORITMO DE DIJKSTRA MEJORADO con evitación de obstáculos
     findPathInGraph: function(startId, endId) {
         if (startId === endId) return { path: [startId], totalDistance: 0 };
         
         const distances = {};
+        const costs = {}; // Nuevo: costos considerando obstáculos
         const previous = {};
         const unvisited = new Set();
         const visited = new Set();
         
         this.campusGraph.nodes.forEach(node => {
             distances[node.id] = node.id === startId ? 0 : Infinity;
+            costs[node.id] = node.id === startId ? 0 : Infinity; // Inicializar costos
             previous[node.id] = null;
             unvisited.add(node.id);
         });
         
         while (unvisited.size > 0) {
             let currentId = null;
-            let minDistance = Infinity;
+            let minCost = Infinity;
             
+            // Buscar nodo con menor costo (no solo distancia)
             unvisited.forEach(nodeId => {
-                if (distances[nodeId] < minDistance) {
-                    minDistance = distances[nodeId];
+                if (costs[nodeId] < minCost) {
+                    minCost = costs[nodeId];
                     currentId = nodeId;
                 }
             });
             
-            if (currentId === null || minDistance === Infinity) break;
+            if (currentId === null || minCost === Infinity) break;
             
             if (currentId === endId) {
                 const path = this.reconstructPath(previous, startId, endId);
                 return {
                     path: path,
                     totalDistance: distances[endId],
+                    totalCost: costs[endId],
                     nodes: path.map(id => this.campusGraph.nodes[id])
                 };
             }
@@ -1003,19 +1204,27 @@ const routingSystem = {
             );
             
             connections.forEach(edge => {
-                let edgeCost = edge.distance;
+                let edgeCost = edge.cost; // Usar costo en lugar de distancia
                 
+                // Aplicar preferencias de accesibilidad
                 if (appState.settings.avoidStairs && edge.routeType === 'stairs') {
-                    edgeCost *= 5;
+                    edgeCost *= 5; // Alta penalización por escaleras
                 }
                 
                 if (appState.settings.prioritizeElevators && edge.routeType === 'ramp') {
-                    edgeCost *= 0.5;
+                    edgeCost *= 0.3; // Gran beneficio por rampas
                 }
                 
-                const alternativeDistance = distances[currentId] + edgeCost;
+                // Penalizar nodos cerca de obstáculos
+                if (this.campusGraph.obstacleNodes.has(edge.to)) {
+                    edgeCost *= 3;
+                }
                 
-                if (alternativeDistance < distances[edge.to]) {
+                const alternativeCost = costs[currentId] + edgeCost;
+                const alternativeDistance = distances[currentId] + edge.distance;
+                
+                if (alternativeCost < costs[edge.to]) {
+                    costs[edge.to] = alternativeCost;
                     distances[edge.to] = alternativeDistance;
                     previous[edge.to] = currentId;
                 }
@@ -1178,36 +1387,6 @@ const routingSystem = {
         };
     },
     
-    // Obtener puntos de interés cerca de un nodo
-    getPointsOfInterestNearNode: function(node, maxDistance) {
-        const points = [];
-        
-        Object.keys(this.routePoints).forEach(routeName => {
-            this.routePoints[routeName].forEach(point => {
-                const distance = this.calculateDistance(node.coord, point.coordinates);
-                if (distance <= maxDistance) {
-                    points.push(point);
-                }
-            });
-        });
-        
-        return points;
-    },
-    
-    // Generar instrucción para punto de interés
-    getPointInstruction: function(point) {
-        switch(point.type) {
-            case 'stairs':
-                return `Atención: escaleras por delante. Tenga cuidado.`;
-            case 'ramp':
-                return `Rampa disponible. Puede usarla si necesita.`;
-            case 'relief_change':
-                return `Cambio de relieve en el camino. Preste atención al suelo.`;
-            default:
-                return `Punto de interés: ${point.name}`;
-        }
-    },
-    
     // Ruta directa (fallback)
     calculateDirectRoute: function(start, end) {
         const distance = this.calculateDistance(start, end);
@@ -1352,20 +1531,6 @@ const navigationSystem = {
         pointsSystem.checkProximityToPoints(userLocation, this.currentRoute);
         
         this.checkRouteDeviation(userLocation);
-    },
-    
-    // Verificar proximidad a puntos de interés
-    checkProximityToPoints: function(userLocation) {
-        if (!this.currentRoute.instructions) return;
-        
-        const currentInstruction = this.currentRoute.instructions[this.currentInstructionIndex];
-        if (currentInstruction && currentInstruction.point) {
-            const distanceToPoint = routingSystem.calculateDistance(userLocation, [currentInstruction.point.geometry.coordinates[1], currentInstruction.point.geometry.coordinates[0]]);
-            
-            if (distanceToPoint <= 15) {
-                voiceGuide.announcePointOfInterest(currentInstruction.point.properties.type, currentInstruction.point.properties.name);
-            }
-        }
     },
     
     // Verificar desviación de la ruta
@@ -2476,20 +2641,32 @@ function showAllDestinationsModal() {
 }
 
 /**
- * Renderiza destinos por categoría
+ * Renderiza destinos por categoría SIN DUPLICADOS
  */
 function renderDestinationsByCategory() {
-    return destinationsSystem.categories.map(category => `
+    return destinationsSystem.categories.map(category => {
+        // Filtrar items únicos por nombre
+        const uniqueItems = [];
+        const seenNames = new Set();
+        
+        category.items.forEach(item => {
+            if (!seenNames.has(item.name)) {
+                seenNames.add(item.name);
+                uniqueItems.push(item);
+            }
+        });
+        
+        return `
         <div class="mb-6">
             <div class="flex items-center gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
                 <i data-lucide="${category.icon}" class="w-5 h-5 text-blue-600"></i>
                 <h4 class="font-semibold text-gray-900">${category.name}</h4>
                 <span class="ml-auto text-sm text-gray-500 bg-white px-2 py-1 rounded">
-                    ${category.items.length}
+                    ${uniqueItems.length}
                 </span>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                ${category.items.map(item => `
+                ${uniqueItems.map(item => `
                     <button 
                         onclick="selectDestinationFromModal('${item.name}')"
                         class="text-left p-3 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors w-full"
@@ -2500,7 +2677,8 @@ function renderDestinationsByCategory() {
                 `).join('')}
             </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 /**
@@ -2840,6 +3018,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Función de depuración para verificar bloques
+    function debugBlocks() {
+        const blocksCategory = destinationsSystem.categories.find(cat => cat.id === 'bloques');
+        if (blocksCategory) {
+            console.log('📊 DEBUG - Bloques cargados:');
+            blocksCategory.items.forEach((block, index) => {
+                console.log(`${index + 1}. ${block.name} -> ${block.displayName}`);
+            });
+            console.log(`Total: ${blocksCategory.items.length} bloques únicos`);
+        }
+    }
+
+    // Llamar después de cargar los datos
+    setTimeout(debugBlocks, 3000);
 
     window.testDijkstra = testDijkstra;
     window.voiceRecognition = voiceRecognition;
