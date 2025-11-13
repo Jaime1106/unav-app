@@ -101,7 +101,7 @@ const destinationsSystem = {
             name: '🚪 Entradas',
             icon: 'door-open',
             items: [
-                { name: 'entrada cl. 58', displayName: 'Entrada Calle 58' },
+                { name: 'entrada Calle 58', displayName: 'Entrada Calle 58' },
                 { name: 'entrada cul', displayName: 'Entrada CUL' }
             ]
         },
@@ -237,7 +237,7 @@ const destinationsSystem = {
             // Destinos principales
             { name: 'Biblioteca', icon: 'BookOpen', action: 'Biblioteca CUC', category: 'servicios' },
             { name: 'Cafetería', icon: 'Utensils', action: 'Central', category: 'servicios' },
-            { name: 'Entrada', icon: 'DoorOpen', action: 'entrada cl. 58', category: 'entradas' },
+            { name: 'Entrada', icon: 'DoorOpen', action: 'entrada Calle 58', category: 'entradas' },
             { name: 'Parking', icon: 'Car', action: 'Parqueaderos zona sur', category: 'parqueaderos' },
             
             // Destinos adicionales populares
@@ -400,6 +400,9 @@ const voiceGuide = {
     // Función mejorada para instrucciones de navegación
     giveNavigationInstruction: function(instruction, distance = null) {
         let fullInstruction = instruction;
+        if (instruction.type === 'relief_change') {
+            return null; // No anunciar cambios de relieve
+        }
         if (distance !== null && distance > 5) {
             fullInstruction += `. En aproximadamente ${Math.round(distance)} metros`;
         }
@@ -560,7 +563,7 @@ const pointsSystem = {
         const properties = point.properties;
         
         if (properties.audio_alert && appState.settings.isVoiceActive) {
-            voiceGuide.announcePointOfInterest(properties.type, properties.name);
+            //voiceGuide.announcePointOfInterest(properties.type, properties.name);
         }
         
         // Mostrar notificación visual
@@ -957,7 +960,7 @@ const routingSystem = {
                 // Penalizar segmentos cerca de obstáculos
                 let cost = distance;
                 if (prevNode.isNearObstacle || currentNode.isNearObstacle) {
-                    cost *= 2; // Penalización por estar cerca de obstáculos
+                    cost *= 10; // Penalización AUMENTADA por estar cerca de obstáculos
                 }
                 
                 this.campusGraph.edges.push({
@@ -989,7 +992,10 @@ const routingSystem = {
     identifyObstacleAreas: function() {
         this.obstacleAreas = [];
         
-        if (!appState.buildingData) return;
+        if (!appState.buildingData) {
+            console.error("Datos de edificios no disponibles para identificar obstáculos.");
+            return;
+        }
         
         appState.buildingData.features.forEach(building => {
             if (building.properties.obstacle === true || 
@@ -1006,6 +1012,11 @@ const routingSystem = {
                 this.obstacleAreas.push(obstacleArea);
             }
         });
+
+        console.log(`Áreas de obstáculos identificadas: ${this.obstacleAreas.length}`);
+        if (this.obstacleAreas.length === 0) {
+            console.warn("No se identificaron áreas de obstáculos. La evasión de edificios puede no funcionar.");
+        }
     },
     
     // Calcular límites de polígono
@@ -1217,7 +1228,7 @@ const routingSystem = {
                 
                 // Penalizar nodos cerca de obstáculos
                 if (this.campusGraph.obstacleNodes.has(edge.to)) {
-                    edgeCost *= 3;
+                    edgeCost *= 10; // Penalización AUMENTADA
                 }
                 
                 const alternativeCost = costs[currentId] + edgeCost;
@@ -1267,6 +1278,7 @@ const routingSystem = {
     
     // Calcular ruta completa con instrucciones
     calculateRouteToDestination: function(startLocation, destinationLocation, destinationName = '') {
+         voiceGuide.clearQueue();
         if (!this.campusGraph) {
             return this.calculateDirectRoute(startLocation, destinationLocation);
         }
@@ -1455,26 +1467,12 @@ const navigationSystem = {
         
         const locationSource = manualLocationSystem.isActive ? "ubicación manual" : "GPS";
         
-        // Informar sobre puntos de interés en la ruta
-        if (route.nearbyPoints && route.nearbyPoints.length > 0) {
-            const highPriorityPoints = route.nearbyPoints.filter(p => 
-                p.point.properties.priority === 'high'
-            ).length;
-            
-            voiceGuide.speak(
-                `Navegación iniciada desde ${locationSource}. ` +
-                `${route.instructions.length} instrucciones hasta ${destinationName}. ` +
-                `Distancia total: ${Math.round(route.distance)} metros. ` +
-                `Encontrará ${route.nearbyPoints.length} puntos de interés en el camino, ` +
-                `${highPriorityPoints} de ellos requieren especial atención.`
-            );
-        } else {
-            voiceGuide.speak(
-                `Navegación iniciada desde ${locationSource}. ` +
-                `${route.instructions.length} instrucciones hasta ${destinationName}. ` +
-                `Distancia total: ${Math.round(route.distance)} metros.`
-            );
-        }
+
+        voiceGuide.speak(
+            `Navegación iniciada desde ${locationSource}. ` +
+            `Distancia total: ${Math.round(route.distance)} metros.`
+        );
+     
         
         setTimeout(() => {
             this.giveNextInstruction();
@@ -1499,8 +1497,9 @@ const navigationSystem = {
         if (this.currentInstructionIndex < this.currentRoute.instructions.length) {
             const instruction = this.currentRoute.instructions[this.currentInstructionIndex];
             this.lastInstruction = instruction.text;
+            console.log(instruction)
             voiceGuide.giveNavigationInstruction(instruction.text, instruction.distance);
-            
+            //TODO: las instrucciones n deberian funcinar asi, hay que revisarlo( manejarlo en funcion de distancia recorrida)
             if (instruction.distance > 0) {
                 const timeToNext = (instruction.distance / 1.4) * 1000;
                 setTimeout(() => {
@@ -1943,7 +1942,7 @@ const voiceRecognition = {
 
 // --- 10. SISTEMA DE UBICACIÓN MANUAL ---
 const manualLocationSystem = {
-    isActive: false,
+    isActive: true,
     manualMarker: null,
     manualInstruction: null,
     
@@ -2476,7 +2475,7 @@ const mapSystem = {
 
             const routeInfo = "Calculando ruta óptima con Dijkstra...";
                 
-            voiceGuide.speak(`Destino establecido: ${destinationName}. ${routeInfo} ${appState.currentLocation ? 'Calculando ruta óptima con Dijkstra...' : 'Active el GPS o use el modo manual para establecer su ubicación.'}`);
+            voiceGuide.speak(`Destino establecido: ${destinationName}. ${appState.currentLocation ? {routeInfo} : 'Active el GPS o use el modo manual para establecer su ubicación.'}`);
             
             if (!appState.isTracking && appState.settings.useGPS) {
                 this.startGPSTracking();
