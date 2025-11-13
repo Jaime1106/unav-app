@@ -960,7 +960,7 @@ const routingSystem = {
                 // Penalizar segmentos cerca de obstáculos
                 let cost = distance;
                 if (prevNode.isNearObstacle || currentNode.isNearObstacle) {
-                    cost *= 10; // Penalización AUMENTADA por estar cerca de obstáculos
+                    cost *= 3; // Penalización AUMENTADA por estar cerca de obstáculos
                 }
                 
                 this.campusGraph.edges.push({
@@ -1228,7 +1228,7 @@ const routingSystem = {
                 
                 // Penalizar nodos cerca de obstáculos
                 if (this.campusGraph.obstacleNodes.has(edge.to)) {
-                    edgeCost *= 10; // Penalización AUMENTADA
+                    edgeCost *= 3; // Penalización AUMENTADA
                 }
                 
                 const alternativeCost = costs[currentId] + edgeCost;
